@@ -121,3 +121,93 @@ fn write_row(out: &mut String, cells: &[String], widths: &[usize]) {
 fn escape_cell(cell: &str) -> String {
     cell.replace('|', "\\|").replace('\n', " ").replace('\r', "")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_simple_table() {
+        let input = "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n";
+        let (table, warnings) = parse(input).unwrap();
+        assert_eq!(table.headers, vec!["a", "b"]);
+        assert_eq!(table.rows, vec![vec!["1", "2"], vec!["3", "4"]]);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn parses_table_without_outer_pipes() {
+        let input = "a | b\n---|---\n1 | 2\n";
+        let (table, _) = parse(input).unwrap();
+        assert_eq!(table.headers, vec!["a", "b"]);
+        assert_eq!(table.rows, vec![vec!["1", "2"]]);
+    }
+
+    #[test]
+    fn parses_separator_with_alignment_colons() {
+        let input = "| a | b |\n|:---|---:|\n| 1 | 2 |\n";
+        let (table, _) = parse(input).unwrap();
+        assert_eq!(table.headers, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn parses_escaped_pipe_in_cell() {
+        let input = "| a |\n|---|\n| x \\| y |\n";
+        let (table, _) = parse(input).unwrap();
+        assert_eq!(table.rows, vec![vec!["x | y"]]);
+    }
+
+    #[test]
+    fn skips_blank_lines() {
+        let input = "| a | b |\n|---|---|\n\n| 1 | 2 |\n\n";
+        let (table, _) = parse(input).unwrap();
+        assert_eq!(table.rows, vec![vec!["1", "2"]]);
+    }
+
+    #[test]
+    fn missing_separator_row_is_an_error() {
+        let err = parse("| a | b |\n| 1 | 2 |\n").unwrap_err();
+        assert!(err.contains("separator"));
+    }
+
+    #[test]
+    fn too_few_lines_is_an_error() {
+        let err = parse("| a | b |\n").unwrap_err();
+        assert!(err.contains("header row and a separator row"));
+    }
+
+    #[test]
+    fn short_row_is_padded_with_a_warning() {
+        let input = "| a | b | c |\n|---|---|---|\n| 1 | 2 |\n";
+        let (table, warnings) = parse(input).unwrap();
+        assert_eq!(table.rows, vec![vec!["1", "2", ""]]);
+        assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn write_pads_columns_to_equal_width() {
+        let table = Table {
+            headers: vec!["a".to_string(), "bb".to_string()],
+            rows: vec![vec!["1".to_string(), "22".to_string()]],
+        };
+        assert_eq!(write(&table), "| a   | bb  |\n| --- | --- |\n| 1   | 22  |\n");
+    }
+
+    #[test]
+    fn write_escapes_pipes_and_strips_newlines() {
+        let table = Table {
+            headers: vec!["a".to_string()],
+            rows: vec![vec!["x|y\nz".to_string()]],
+        };
+        assert_eq!(write(&table), "| a      |\n| ------ |\n| x\\|y z |\n");
+    }
+
+    #[test]
+    fn round_trips_through_parse_and_write() {
+        let input = "| a | b |\n|---|---|\n| 1 | 2 |\n";
+        let (table, _) = parse(input).unwrap();
+        let (table2, _) = parse(&write(&table)).unwrap();
+        assert_eq!(table.headers, table2.headers);
+        assert_eq!(table.rows, table2.rows);
+    }
+}

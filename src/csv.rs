@@ -119,3 +119,92 @@ fn escape_field(field: &str) -> String {
         field.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_simple_table() {
+        let (table, warnings) = parse("a,b,c\n1,2,3\n4,5,6\n").unwrap();
+        assert_eq!(table.headers, vec!["a", "b", "c"]);
+        assert_eq!(table.rows, vec![vec!["1", "2", "3"], vec!["4", "5", "6"]]);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn parses_without_trailing_newline() {
+        let (table, _) = parse("a,b\n1,2").unwrap();
+        assert_eq!(table.rows, vec![vec!["1", "2"]]);
+    }
+
+    #[test]
+    fn parses_crlf_line_endings() {
+        let (table, _) = parse("a,b\r\n1,2\r\n").unwrap();
+        assert_eq!(table.headers, vec!["a", "b"]);
+        assert_eq!(table.rows, vec![vec!["1", "2"]]);
+    }
+
+    #[test]
+    fn parses_quoted_field_with_comma_and_newline() {
+        let (table, _) = parse("a,b\n\"x,y\",\"line1\nline2\"\n").unwrap();
+        assert_eq!(table.rows, vec![vec!["x,y", "line1\nline2"]]);
+    }
+
+    #[test]
+    fn parses_escaped_double_quote() {
+        let (table, _) = parse("a\n\"she said \"\"hi\"\"\"\n").unwrap();
+        assert_eq!(table.rows, vec![vec!["she said \"hi\""]]);
+    }
+
+    #[test]
+    fn unterminated_quote_is_an_error() {
+        let err = parse("a\n\"unterminated\n").unwrap_err();
+        assert!(err.contains("unterminated"));
+    }
+
+    #[test]
+    fn empty_input_is_an_error() {
+        let err = parse("").unwrap_err();
+        assert!(err.contains("no rows"));
+    }
+
+    #[test]
+    fn short_row_is_padded_with_a_warning() {
+        let (table, warnings) = parse("a,b,c\n1,2\n").unwrap();
+        assert_eq!(table.rows, vec![vec!["1", "2", ""]]);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("2 field(s), expected 3"));
+    }
+
+    #[test]
+    fn long_row_is_truncated_with_a_warning() {
+        let (table, warnings) = parse("a,b\n1,2,3\n").unwrap();
+        assert_eq!(table.rows, vec![vec!["1", "2"]]);
+        assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn write_round_trips_a_simple_table() {
+        let (table, _) = parse("a,b\n1,2\n3,4\n").unwrap();
+        assert_eq!(write(&table), "a,b\n1,2\n3,4\n");
+    }
+
+    #[test]
+    fn write_quotes_fields_that_need_it() {
+        let table = Table {
+            headers: vec!["a".to_string()],
+            rows: vec![vec!["has,comma".to_string()], vec!["has\"quote".to_string()]],
+        };
+        assert_eq!(write(&table), "a\n\"has,comma\"\n\"has\"\"quote\"\n");
+    }
+
+    #[test]
+    fn write_leaves_plain_fields_unquoted() {
+        let table = Table {
+            headers: vec!["a".to_string()],
+            rows: vec![vec!["plain".to_string()]],
+        };
+        assert_eq!(write(&table), "a\nplain\n");
+    }
+}
