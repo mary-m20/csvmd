@@ -14,7 +14,7 @@ from the command line.
 
 ## usage
 
-    csvmd <input> --to csv|md -o <output> [--json]
+    csvmd [<input>] --to csv|md [-o <output>] [--from csv|md] [--json]
 
 Examples:
 
@@ -35,6 +35,29 @@ piping into another script:
     $ csvmd employees.csv --to md -o employees.md --json
     {"input_path":"employees.csv","input_format":"csv","output_path":"employees.md","output_format":"markdown","rows":6,"columns":3,"warnings":[]}
 
+### stdin and stdout
+
+Leave off `<input>` (or pass `-`) to read from stdin, and leave off
+`-o`/`--output` (or pass `-`) to write to stdout:
+
+    $ cat employees.csv | csvmd --from csv --to md
+    | name  | role      |
+    | ----- | --------- |
+    | Ana   | engineer  |
+    | Ravi  | designer  |
+
+`--from` is required when reading from stdin, since there's no file
+extension for csvmd to detect the format from. It's optional otherwise and
+overrides the extension-based detection if given.
+
+When the converted output goes to stdout, the summary/JSON report is
+printed to stderr instead, so the stdout stream stays pipeable:
+
+    $ cat employees.csv | csvmd --from csv --to md > employees.md
+    converted - (csv) -> - (markdown)
+    2 rows, 2 columns
+    no warnings
+
 ## format notes
 
 - CSV parsing follows RFC 4180: fields containing a comma, a quote, or a
@@ -51,5 +74,4 @@ piping into another script:
 ## status
 
 Early. Handles exactly two formats and no column alignment markers on
-markdown tables yet, no TSV support, no stdin/stdout streaming. Adding
-things as I actually need them.
+markdown tables yet, no TSV support. Adding things as I actually need them.

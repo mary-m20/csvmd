@@ -1,5 +1,6 @@
 use std::env;
 use std::fs;
+use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process;
 
@@ -17,9 +18,10 @@ enum Format {
 }
 
 struct Args {
-    input: String,
+    input: Option<String>,
+    from: Option<Format>,
     to: Format,
-    output: String,
+    output: Option<String>,
     json: bool,
 }
 
@@ -32,10 +34,28 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let args = parse_args(env::args().skip(1).collect())?;
-    let input_format = detect_format(&args.input)?;
 
-    let content = fs::read_to_string(&args.input)
-        .map_err(|e| format!("reading {}: {}", args.input, e))?;
+    let reading_stdin = matches!(args.input.as_deref(), None | Some("-"));
+    let writing_stdout = matches!(args.output.as_deref(), None | Some("-"));
+
+    let input_format = match args.from {
+        Some(f) => f,
+        None if reading_stdin => {
+            return Err("reading from stdin requires --from csv|md".to_string())
+        }
+        None => detect_format(args.input.as_deref().unwrap())?,
+    };
+
+    let content = if reading_stdin {
+        let mut buf = String::new();
+        io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|e| format!("reading stdin: {}", e))?;
+        buf
+    } else {
+        let path = args.input.as_deref().unwrap();
+        fs::read_to_string(path).map_err(|e| format!("reading {}: {}", path, e))?
+    };
 
     let (table, warnings) = match input_format {
         Format::Csv => csv::parse(&content),
@@ -51,23 +71,37 @@ fn run() -> Result<(), String> {
         Format::Markdown => markdown::write(&table),
     };
 
-    fs::write(&args.output, &output_content)
-        .map_err(|e| format!("writing {}: {}", args.output, e))?;
+    if writing_stdout {
+        io::stdout()
+            .write_all(output_content.as_bytes())
+            .map_err(|e| format!("writing stdout: {}", e))?;
+    } else {
+        let path = args.output.as_deref().unwrap();
+        fs::write(path, &output_content).map_err(|e| format!("writing {}: {}", path, e))?;
+    }
 
     let report = Report {
-        input_path: args.input.clone(),
+        input_path: args.input.clone().unwrap_or_else(|| "-".to_string()),
         input_format: format_name(input_format).to_string(),
-        output_path: args.output.clone(),
+        output_path: args.output.clone().unwrap_or_else(|| "-".to_string()),
         output_format: format_name(args.to).to_string(),
         rows: table.rows.len(),
         columns: table.headers.len(),
         warnings,
     };
 
-    if args.json {
-        print!("{}", report.to_json());
+    let report_text = if args.json {
+        report.to_json()
     } else {
-        print!("{}", report.to_human());
+        report.to_human()
+    };
+
+    // Keep converted content on stdout pipeable: when it's the thing going to
+    // stdout, the report goes to stderr instead of interleaving with it.
+    if writing_stdout {
+        eprint!("{}", report_text);
+    } else {
+        print!("{}", report_text);
     }
 
     Ok(())
@@ -75,6 +109,7 @@ fn run() -> Result<(), String> {
 
 fn parse_args(raw: Vec<String>) -> Result<Args, String> {
     let mut input: Option<String> = None;
+    let mut from: Option<Format> = None;
     let mut to: Option<Format> = None;
     let mut output: Option<String> = None;
     let mut json = false;
@@ -82,13 +117,13 @@ fn parse_args(raw: Vec<String>) -> Result<Args, String> {
     let mut iter = raw.into_iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
+            "--from" => {
+                let v = iter.next().ok_or("--from requires a value (csv or md)")?;
+                from = Some(parse_format(&v)?);
+            }
             "--to" => {
                 let v = iter.next().ok_or("--to requires a value (csv or md)")?;
-                to = Some(match v.as_str() {
-                    "csv" => Format::Csv,
-                    "md" | "markdown" => Format::Markdown,
-                    other => return Err(format!("unknown format '{}': expected csv or md", other)),
-                });
+                to = Some(parse_format(&v)?);
             }
             "-o" | "--output" => {
                 let v = iter.next().ok_or("--output requires a file path")?;
@@ -99,6 +134,7 @@ fn parse_args(raw: Vec<String>) -> Result<Args, String> {
                 print_usage();
                 process::exit(0);
             }
+            "-" if input.is_none() => input = Some("-".to_string()),
             other if !other.starts_with('-') && input.is_none() => {
                 input = Some(other.to_string());
             }
@@ -106,15 +142,30 @@ fn parse_args(raw: Vec<String>) -> Result<Args, String> {
         }
     }
 
-    let input = input.ok_or("missing input file; usage: csvmd <input> --to csv|md -o <output>")?;
     let to = to.ok_or("missing --to csv|md")?;
-    let output = output.ok_or("missing -o/--output <path>")?;
 
-    Ok(Args { input, to, output, json })
+    Ok(Args {
+        input,
+        from,
+        to,
+        output,
+        json,
+    })
+}
+
+fn parse_format(v: &str) -> Result<Format, String> {
+    match v {
+        "csv" => Ok(Format::Csv),
+        "md" | "markdown" => Ok(Format::Markdown),
+        other => Err(format!("unknown format '{}': expected csv or md", other)),
+    }
 }
 
 fn print_usage() {
-    println!("usage: csvmd <input> --to csv|md -o <output> [--json]");
+    println!("usage: csvmd [<input>] --to csv|md [-o <output>] [--from csv|md] [--json]");
+    println!();
+    println!("<input> and -o/--output default to stdin/stdout when omitted, or given as -.");
+    println!("--from is required when reading from stdin, since there's no extension to detect the format from.");
 }
 
 fn detect_format(path: &str) -> Result<Format, String> {
