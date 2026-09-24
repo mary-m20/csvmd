@@ -8,12 +8,14 @@ mod csv;
 mod markdown;
 mod report;
 mod table;
+mod tsv;
 
 use report::Report;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Format {
     Csv,
+    Tsv,
     Markdown,
 }
 
@@ -41,7 +43,7 @@ fn run() -> Result<(), String> {
     let input_format = match args.from {
         Some(f) => f,
         None if reading_stdin => {
-            return Err("reading from stdin requires --from csv|md".to_string())
+            return Err("reading from stdin requires --from csv|tsv|md".to_string())
         }
         None => detect_format(args.input.as_deref().unwrap())?,
     };
@@ -59,6 +61,7 @@ fn run() -> Result<(), String> {
 
     let (table, warnings) = match input_format {
         Format::Csv => csv::parse(&content),
+        Format::Tsv => tsv::parse(&content),
         Format::Markdown => markdown::parse(&content),
     }?;
 
@@ -68,6 +71,7 @@ fn run() -> Result<(), String> {
 
     let output_content = match args.to {
         Format::Csv => csv::write(&table),
+        Format::Tsv => tsv::write(&table),
         Format::Markdown => markdown::write(&table),
     };
 
@@ -118,11 +122,15 @@ fn parse_args(raw: Vec<String>) -> Result<Args, String> {
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--from" => {
-                let v = iter.next().ok_or("--from requires a value (csv or md)")?;
+                let v = iter
+                    .next()
+                    .ok_or("--from requires a value (csv, tsv, or md)")?;
                 from = Some(parse_format(&v)?);
             }
             "--to" => {
-                let v = iter.next().ok_or("--to requires a value (csv or md)")?;
+                let v = iter
+                    .next()
+                    .ok_or("--to requires a value (csv, tsv, or md)")?;
                 to = Some(parse_format(&v)?);
             }
             "-o" | "--output" => {
@@ -142,7 +150,7 @@ fn parse_args(raw: Vec<String>) -> Result<Args, String> {
         }
     }
 
-    let to = to.ok_or("missing --to csv|md")?;
+    let to = to.ok_or("missing --to csv|tsv|md")?;
 
     Ok(Args {
         input,
@@ -156,13 +164,17 @@ fn parse_args(raw: Vec<String>) -> Result<Args, String> {
 fn parse_format(v: &str) -> Result<Format, String> {
     match v {
         "csv" => Ok(Format::Csv),
+        "tsv" => Ok(Format::Tsv),
         "md" | "markdown" => Ok(Format::Markdown),
-        other => Err(format!("unknown format '{}': expected csv or md", other)),
+        other => Err(format!(
+            "unknown format '{}': expected csv, tsv, or md",
+            other
+        )),
     }
 }
 
 fn print_usage() {
-    println!("usage: csvmd [<input>] --to csv|md [-o <output>] [--from csv|md] [--json]");
+    println!("usage: csvmd [<input>] --to csv|tsv|md [-o <output>] [--from csv|tsv|md] [--json]");
     println!();
     println!("<input> and -o/--output default to stdin/stdout when omitted, or given as -.");
     println!("--from is required when reading from stdin, since there's no extension to detect the format from.");
@@ -177,9 +189,10 @@ fn detect_format(path: &str) -> Result<Format, String> {
 
     match ext.as_str() {
         "csv" => Ok(Format::Csv),
+        "tsv" => Ok(Format::Tsv),
         "md" | "markdown" => Ok(Format::Markdown),
         _ => Err(format!(
-            "cannot detect the format of {} from its extension; expected .csv, .md, or .markdown",
+            "cannot detect the format of {} from its extension; expected .csv, .tsv, .md, or .markdown",
             path
         )),
     }
@@ -188,6 +201,7 @@ fn detect_format(path: &str) -> Result<Format, String> {
 fn format_name(f: Format) -> &'static str {
     match f {
         Format::Csv => "csv",
+        Format::Tsv => "tsv",
         Format::Markdown => "markdown",
     }
 }

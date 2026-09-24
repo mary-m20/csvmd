@@ -5,8 +5,8 @@ pages, PR descriptions) as tables, and every so often I need to go the other
 way and pull a table back out of a doc into a CSV a spreadsheet can open.
 Doing either by hand is fiddly the moment a cell has a comma or a pipe in it.
 
-csvmd converts between CSV and markdown pipe tables, in both directions,
-from the command line.
+csvmd converts between CSV, TSV, and markdown pipe tables, in any
+direction, from the command line.
 
 ## build
 
@@ -14,7 +14,7 @@ from the command line.
 
 ## usage
 
-    csvmd [<input>] --to csv|md [-o <output>] [--from csv|md] [--json]
+    csvmd [<input>] --to csv|tsv|md [-o <output>] [--from csv|tsv|md] [--json]
 
 Examples:
 
@@ -63,15 +63,21 @@ printed to stderr instead, so the stdout stream stays pipeable:
 - CSV parsing follows RFC 4180: fields containing a comma, a quote, or a
   newline must be wrapped in double quotes, and a literal quote inside a
   quoted field is written as two double quotes (`""`).
+- TSV fields are tab-separated and unquoted; a literal tab, newline,
+  carriage return, or backslash in a field is backslash-escaped
+  (`\t`, `\n`, `\r`, `\\`), the convention used by MySQL/Postgres
+  tab-delimited dumps.
 - Markdown tables use the standard pipe syntax with a `---` header
   separator row. A literal `|` inside a cell is escaped as `\|`.
-- The input file's extension decides how it's read (`.csv`, or `.md` /
-  `.markdown`); the `--to` flag decides how it's written.
+- The input file's extension decides how it's read (`.csv`, `.tsv`, or
+  `.md` / `.markdown`); the `--to` flag decides how it's written.
 - If a data row has a different number of fields than the header row,
   csvmd pads or truncates it to fit and reports it as a warning rather
   than failing the whole conversion.
 
 ## status
 
-Early. Handles exactly two formats and no column alignment markers on
-markdown tables yet, no TSV support. Adding things as I actually need them.
+Early. Handles three formats (CSV, TSV, markdown) but no column
+alignment markers on markdown tables yet, and no `--delimiter` flag for
+CSV variants that don't use a comma. Adding things as I actually need
+them.
