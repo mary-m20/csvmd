@@ -29,7 +29,7 @@ pub fn parse(input: &str) -> Result<(Table, Vec<String>), String> {
         rows.push(record);
     }
 
-    Ok((Table { headers, rows }, warnings))
+    Ok((Table::new(headers, rows), warnings))
 }
 
 fn parse_records(input: &str) -> Result<Vec<Vec<String>>, String> {
@@ -180,14 +180,14 @@ mod tests {
 
     #[test]
     fn write_escapes_special_characters() {
-        let table = Table {
-            headers: vec!["a".to_string()],
-            rows: vec![
+        let table = Table::new(
+            vec!["a".to_string()],
+            vec![
                 vec!["has\ttab".to_string()],
                 vec!["has\nnewline".to_string()],
                 vec!["has\\backslash".to_string()],
             ],
-        };
+        );
         assert_eq!(
             write(&table),
             "a\nhas\\ttab\nhas\\nnewline\nhas\\\\backslash\n"

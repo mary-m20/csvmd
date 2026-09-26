@@ -28,7 +28,7 @@ pub fn parse(input: &str) -> Result<(Table, Vec<String>), String> {
         rows.push(record);
     }
 
-    Ok((Table { headers, rows }, warnings))
+    Ok((Table::new(headers, rows), warnings))
 }
 
 fn parse_records(input: &str) -> Result<Vec<Vec<String>>, String> {
@@ -192,19 +192,16 @@ mod tests {
 
     #[test]
     fn write_quotes_fields_that_need_it() {
-        let table = Table {
-            headers: vec!["a".to_string()],
-            rows: vec![vec!["has,comma".to_string()], vec!["has\"quote".to_string()]],
-        };
+        let table = Table::new(
+            vec!["a".to_string()],
+            vec![vec!["has,comma".to_string()], vec!["has\"quote".to_string()]],
+        );
         assert_eq!(write(&table), "a\n\"has,comma\"\n\"has\"\"quote\"\n");
     }
 
     #[test]
     fn write_leaves_plain_fields_unquoted() {
-        let table = Table {
-            headers: vec!["a".to_string()],
-            rows: vec![vec!["plain".to_string()]],
-        };
+        let table = Table::new(vec!["a".to_string()], vec![vec!["plain".to_string()]]);
         assert_eq!(write(&table), "a\nplain\n");
     }
 }

@@ -1,4 +1,4 @@
-use crate::table::Table;
+use crate::table::{Alignment, Table};
 
 // Parses a GitHub-flavored markdown pipe table: a header row, a
 // `---`-style separator row, then zero or more data rows.
@@ -9,12 +9,14 @@ pub fn parse(input: &str) -> Result<(Table, Vec<String>), String> {
     }
 
     let headers = split_row(lines[0]);
-    if !is_separator(lines[1], headers.len()) {
+    let separator_cells = split_row(lines[1]);
+    if !is_separator(&separator_cells, headers.len()) {
         return Err(
             "second line of the markdown table must be a header separator, e.g. |---|---|"
                 .to_string(),
         );
     }
+    let alignments: Vec<Alignment> = separator_cells.iter().map(|c| parse_alignment(c)).collect();
 
     let width = headers.len();
     let mut rows = Vec::new();
@@ -35,7 +37,20 @@ pub fn parse(input: &str) -> Result<(Table, Vec<String>), String> {
         rows.push(cells);
     }
 
-    Ok((Table { headers, rows }, warnings))
+    let mut table = Table::new(headers, rows);
+    table.alignments = alignments;
+    Ok((table, warnings))
+}
+
+// Reads the alignment off a single separator cell, e.g. ":---" is left,
+// "---:" is right, ":---:" is center, and a bare "---" is unspecified.
+fn parse_alignment(cell: &str) -> Alignment {
+    match (cell.starts_with(':'), cell.ends_with(':')) {
+        (true, true) => Alignment::Center,
+        (true, false) => Alignment::Left,
+        (false, true) => Alignment::Right,
+        (false, false) => Alignment::None,
+    }
 }
 
 fn split_row(line: &str) -> Vec<String> {
@@ -62,28 +77,47 @@ fn split_row(line: &str) -> Vec<String> {
     cells
 }
 
-fn is_separator(line: &str, width: usize) -> bool {
-    let cells = split_row(line);
-    if cells.len() != width {
-        return false;
-    }
-    cells
-        .iter()
-        .all(|c| !c.is_empty() && c.chars().all(|ch| ch == '-' || ch == ':'))
+fn is_separator(cells: &[String], width: usize) -> bool {
+    cells.len() == width
+        && cells
+            .iter()
+            .all(|c| c.contains('-') && c.chars().all(|ch| ch == '-' || ch == ':'))
 }
 
 pub fn write(table: &Table) -> String {
     let widths = column_widths(table);
     let mut out = String::new();
 
-    write_row(&mut out, &table.headers, &widths);
-    let separator: Vec<String> = widths.iter().map(|w| "-".repeat(*w)).collect();
-    write_row(&mut out, &separator, &widths);
+    write_row(&mut out, &table.headers, &widths, &table.alignments);
+    write_separator(&mut out, &widths, &table.alignments);
     for row in &table.rows {
-        write_row(&mut out, row, &widths);
+        write_row(&mut out, row, &widths, &table.alignments);
     }
 
     out
+}
+
+fn write_separator(out: &mut String, widths: &[usize], alignments: &[Alignment]) {
+    out.push('|');
+    for (i, &width) in widths.iter().enumerate() {
+        let align = alignments.get(i).copied().unwrap_or(Alignment::None);
+        out.push(' ');
+        out.push_str(&separator_marker(width, align));
+        out.push(' ');
+        out.push('|');
+    }
+    out.push('\n');
+}
+
+// widths are always at least 3 (see column_widths), so there's room for
+// the colon(s) plus at least one dash in every case below.
+fn separator_marker(width: usize, align: Alignment) -> String {
+    match align {
+        Alignment::None => "-".repeat(width),
+        Alignment::Left => format!(":{}", "-".repeat(width - 1)),
+        Alignment::Right => format!("{}:", "-".repeat(width - 1)),
+        Alignment::Center => format!(":{}:", "-".repeat(width - 2)),
+    }
 }
 
 fn column_widths(table: &Table) -> Vec<usize> {
@@ -102,20 +136,31 @@ fn column_widths(table: &Table) -> Vec<usize> {
     widths
 }
 
-fn write_row(out: &mut String, cells: &[String], widths: &[usize]) {
+fn write_row(out: &mut String, cells: &[String], widths: &[usize], alignments: &[Alignment]) {
     out.push('|');
     for (i, cell) in cells.iter().enumerate() {
         let escaped = escape_cell(cell);
         let width = widths.get(i).copied().unwrap_or(escaped.chars().count());
+        let align = alignments.get(i).copied().unwrap_or(Alignment::None);
         out.push(' ');
-        out.push_str(&escaped);
-        for _ in escaped.chars().count()..width {
-            out.push(' ');
-        }
+        out.push_str(&pad_cell(&escaped, width, align));
         out.push(' ');
         out.push('|');
     }
     out.push('\n');
+}
+
+fn pad_cell(content: &str, width: usize, align: Alignment) -> String {
+    let pad = width.saturating_sub(content.chars().count());
+    match align {
+        Alignment::Right => format!("{}{}", " ".repeat(pad), content),
+        Alignment::Center => {
+            let left = pad / 2;
+            let right = pad - left;
+            format!("{}{}{}", " ".repeat(left), content, " ".repeat(right))
+        }
+        Alignment::Left | Alignment::None => format!("{}{}", content, " ".repeat(pad)),
+    }
 }
 
 fn escape_cell(cell: &str) -> String {
@@ -148,6 +193,14 @@ mod tests {
         let input = "| a | b |\n|:---|---:|\n| 1 | 2 |\n";
         let (table, _) = parse(input).unwrap();
         assert_eq!(table.headers, vec!["a", "b"]);
+        assert_eq!(table.alignments, vec![Alignment::Left, Alignment::Right]);
+    }
+
+    #[test]
+    fn parses_center_alignment_colons() {
+        let input = "| a | b |\n|:---:|---|\n| 1 | 2 |\n";
+        let (table, _) = parse(input).unwrap();
+        assert_eq!(table.alignments, vec![Alignment::Center, Alignment::None]);
     }
 
     #[test]
@@ -186,20 +239,38 @@ mod tests {
 
     #[test]
     fn write_pads_columns_to_equal_width() {
-        let table = Table {
-            headers: vec!["a".to_string(), "bb".to_string()],
-            rows: vec![vec!["1".to_string(), "22".to_string()]],
-        };
+        let table = Table::new(
+            vec!["a".to_string(), "bb".to_string()],
+            vec![vec!["1".to_string(), "22".to_string()]],
+        );
         assert_eq!(write(&table), "| a   | bb  |\n| --- | --- |\n| 1   | 22  |\n");
     }
 
     #[test]
     fn write_escapes_pipes_and_strips_newlines() {
-        let table = Table {
-            headers: vec!["a".to_string()],
-            rows: vec![vec!["x|y\nz".to_string()]],
-        };
+        let table = Table::new(vec!["a".to_string()], vec![vec!["x|y\nz".to_string()]]);
         assert_eq!(write(&table), "| a      |\n| ------ |\n| x\\|y z |\n");
+    }
+
+    #[test]
+    fn write_emits_alignment_markers_and_pads_content() {
+        let mut table = Table::new(
+            vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            vec![vec!["1".to_string(), "22".to_string(), "333".to_string()]],
+        );
+        table.alignments = vec![Alignment::Left, Alignment::Right, Alignment::Center];
+        assert_eq!(
+            write(&table),
+            "| a   |   b |  c  |\n| :-- | --: | :-: |\n| 1   |  22 | 333 |\n"
+        );
+    }
+
+    #[test]
+    fn alignment_round_trips_through_parse_and_write() {
+        let input = "| a | b | c |\n|:---|---:|:---:|\n| 1 | 2 | 3 |\n";
+        let (table, _) = parse(input).unwrap();
+        let (table2, _) = parse(&write(&table)).unwrap();
+        assert_eq!(table.alignments, table2.alignments);
     }
 
     #[test]

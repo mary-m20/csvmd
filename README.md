@@ -69,6 +69,10 @@ printed to stderr instead, so the stdout stream stays pipeable:
   tab-delimited dumps.
 - Markdown tables use the standard pipe syntax with a `---` header
   separator row. A literal `|` inside a cell is escaped as `\|`.
+- Column alignment markers in the separator row (`:---`, `---:`, `:---:`)
+  are read on the way in and preserved on the way out, with cell content
+  padded to match. CSV and TSV have no notion of alignment, so columns
+  converted from those formats get a plain `---` separator.
 - The input file's extension decides how it's read (`.csv`, `.tsv`, or
   `.md` / `.markdown`); the `--to` flag decides how it's written.
 - If a data row has a different number of fields than the header row,
@@ -77,7 +81,6 @@ printed to stderr instead, so the stdout stream stays pipeable:
 
 ## status
 
-Early. Handles three formats (CSV, TSV, markdown) but no column
-alignment markers on markdown tables yet, and no `--delimiter` flag for
-CSV variants that don't use a comma. Adding things as I actually need
-them.
+Early. Handles three formats (CSV, TSV, markdown) with alignment
+markers on markdown tables, but still no `--delimiter` flag for CSV
+variants that don't use a comma. Adding things as I actually need them.
